@@ -1,0 +1,37 @@
+{   
+    "meter_rental": 20.00,
+    "rates":{
+        "standard_blocks":[
+            [25, 3.16], [25, 4.38], [25, 4.74], [25, 5.45], 
+            [100, 6.15], [50, 7.02], [50, 7.90], [200, 10.46], 
+            [500, 10.68], [500, 10.91], [500, 11.13], [99999, 11.36]
+        ],
+        "social_starter_blocks_110A":[[25, 2.18], [25, 3.04], [25, 3.28],[25, 5.45], 
+            [100, 6.15], [50, 7.02], [50, 7.90], [200, 10.46], 
+            [500, 10.68], [500, 10.91], [500, 11.13], [99999, 11.36]
+        ]  
+    },
+    "tariffs":{
+        "110A":{
+            "min_charge": 31.00,
+            "mbc_fee": 150.00,
+            "security_deposits":200.00,
+            "blocks": "social_blocks_110A"
+        },
+        "110":{"min_charge": 44.00,
+            "mbc_fee": 150.00,
+            "security_deposits":200.00,
+            "blocks": "standard_blocks"
+        },
+        "120":{"min_charge": 184.00,
+            "mbc_fee": 150.00,
+            "security_deposits":600.00,
+            "blocks": "standard_blocks"
+        },
+        "140":{"min_charge": 369.00,
+            "mbc_fee": 150.00,
+            "security_deposits":1200.00,
+            "blocks": "standard_blocks"
+        }
+    }
+}
