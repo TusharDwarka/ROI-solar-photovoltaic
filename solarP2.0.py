@@ -73,6 +73,50 @@ def analyse_data(df, system_kwp):
     
     return df
 
+def estimate_units_from_bill(bill_amount, tariff_code):
+    """
+    Takes a total bill in Rs and reverse-calculates the approximate kWh units used.
+    """
+    tariff_data = normal_tariff['tariffs'][tariff_code]
+
+    if tariff_data['blocks'] == 'standard_blocks':
+        blocks = normal_tariff['rates']['standard_blocks']
+    else:
+        blocks = normal_tariff['rates']['social_starter_blocks_110A']
+    
+    # 1. Strip away the fixed fees to find the pure energy cost
+    mbc_fee = tariff_data['mbc_fee']
+    meter_rental = normal_tariff['meter_rental']
+    min_charge = tariff_data['min_charge']
+    
+    target_energy_cost = bill_amount - mbc_fee - meter_rental
+    
+    # Handle edge case: if they input a bill that is just the minimum charge
+    if target_energy_cost <= min_charge:
+        target_energy_cost = min_charge
+    
+    units_estimated = 0
+    remaining_cost = target_energy_cost
+    
+    # 2. Reverse through the blocks
+    for limit, rate in blocks:
+        # Calculate the maximum money this block can charge
+        max_cost_for_block = limit * rate
+        
+        # If our remaining money is bigger than this block's max cost, 
+        # we used up this entire block of units.
+        if remaining_cost > max_cost_for_block:
+            remaining_cost -= max_cost_for_block
+            units_estimated += limit
+        else:
+            # If the remaining money is smaller, we only used a fraction of this block.
+            # Money / Rate = Units
+            units_estimated += (remaining_cost / rate)
+            remaining_cost = 0
+            break  # We are done!
+            
+    return units_estimated
+
 
 def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
 
@@ -154,11 +198,16 @@ def calculate_cst(row):
 
 if __name__ == "__main__" :
 
-    units_used = 339           # User's average monthly CEB bill (kWh)
+
+    monthly_bill_rs = 2300
+    #units_used = 339           # User's average monthly CEB bill (kWh)
     my_tariff = "120"          # User's CEB tariff code
     system_kwp = 2.5           # Size of the solar panels (kW)
     inverter_kw = 5.0          # Size of the inverter (kW)
     battery_kwh = 5.0          # Size of the battery (kWh)
+
+    units_used = estimate_units_from_bill(monthly_bill_rs, my_tariff)
+    print(units_used)
 
     print("\n[1] Fetching PVGIS Solar Data for Mauritius...")
     df = get_solar_data()
