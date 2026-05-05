@@ -63,27 +63,15 @@ def get_solar_data():
         print(f"Failed to fetch data: {e}")
         return None
 
-def analyse_data(df):
+def analyse_data(df, system_kwp):
     df["poa_global"] = df['poa_direct'] + df['poa_sky_diffuse'] + df['poa_ground_diffuse']
-
-    avg_global = df["poa_global"].mean()
-    avg_temp = df['temp_air'].mean()
-
-    print("\n--- Analysis Results ---")
-    print(f"Average Global Irradiance: {avg_global:.2f} W/m²")
-    print(f"Average Temperature:       {avg_temp:.2f} °C")
 
     # convert into kWh
     panel_area = 20 
     efficiency = 0.20 
     pr = 0.85    #performance ratio /Heatloss etc
 
-    df['energy_kwh'] = (df['poa_global'] * panel_area * efficiency * pr) / 1000
-
-    monthly_energy = df['energy_kwh'].resample('M').sum()  #reassemble by month cause its in hour
-
-    #print("\n--- Monthly Solar Generation (kWh) ---")
-    #print(monthly_energy)
+    df['energy_kwh'] = (df['poa_global'] / 1000) * system_kwp * pr
     
     return df
 
@@ -173,7 +161,7 @@ if __name__ == "__main__" :
         # print(df.head())
 
         #monthly
-        df = analyse_data(df)
+        df = analyse_data(df,system_kwp)
 
         print("\n[2] Simulating Battery and CEB Grid Rules...")
         df = hourly_calculation(
