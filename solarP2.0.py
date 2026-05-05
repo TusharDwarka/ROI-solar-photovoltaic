@@ -90,7 +90,9 @@ def analyse_data(df):
 
 def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
 
-    daily_kwh = monthly_bill_kwh/30   # change for better calculation according to year and month
+    df['days_in_month'] = df.index.days_in_month
+
+    df['daily_kwh'] = monthly_bill_kwh / df['days_in_month'] 
 
     conditions = [
         (df.index.hour >= 0) & (df.index.hour < 6),   # Night
@@ -102,7 +104,7 @@ def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
 
     hourly_percentage = [0.025, 0.066, 0.025, 0.070, 0.050] #rough estimate change afterwards
 
-    df['consumption_kwh'] = np.select(conditions,hourly_percentage) * daily_kwh
+    df['consumption_kwh'] = np.select(conditions,hourly_percentage) * df['daily_kwh']
     df['battery_level'] = 0.0
     df['to_ceb_export'] = 0.0
     df['from_ceb_import'] = 0.0
@@ -115,10 +117,14 @@ def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
     export_col_idx = df.columns.get_loc('to_ceb_export')
     wasted_col_idx = df.columns.get_loc('wasted_energy')
     import_col_idx = df.columns.get_loc('from_ceb_import')
+    battery_col_idx = df.columns.get_loc('battery_level')
+
+    solar_col_idx = df.columns.get_loc('energy_kwh')
+    cons_col_idx = df.columns.get_loc('consumption_kwh')
 
     for i in range(len(df)):
-        solar = df['energy_kwh'].iloc[i]
-        cons = df['consumption_kwh'].iloc[i]
+        solar = df.iat[i,solar_col_idx]
+        cons = df.iat[i,cons_col_idx]
 
         net = solar - cons
 
@@ -145,7 +151,7 @@ def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
             from_ceb = needed - from_battery
             df.iat[i,import_col_idx] = from_ceb
 
-        df.iat[i, df.columns.get_loc('battery_level')] = current_battery
+        df.iat[i, battery_col_idx] = current_battery
 
     return df
 
@@ -178,49 +184,63 @@ if __name__ == "__main__" :
         )
 
         #group by month
-        monthly_data = df.resample('M').sum()
-        avg_solar_gen = monthly_data['energy_kwh'].mean()
-        avg_import_ceb = monthly_data['from_ceb_import'].mean()
-        avg_export_ceb = monthly_data['to_ceb_export'].mean()
-        avg_wasted = monthly_data['wasted_energy'].mean()
+        print("\n[3] Generating Monthly Financial Summary...")
+        monthly_data = df.resample('M').sum() # Sum up all the hours for each month
 
-        print("\n[3] Calculating Financials...")
-
-        old_bill_rs = calculate_no_solar_bill(units_used, my_tariff)
-        new_bill_rs = calculate_no_solar_bill(avg_import_ceb, my_tariff)
-
-        export_revenue = avg_export_ceb * 3.00
-
-        final_net_bill = new_bill_rs - export_revenue
+        # Create a brand new DataFrame specifically for our final CSV report
+        summary_df = pd.DataFrame()
         
+        # Pull the summed data into our clean report
+        summary_df['Total_Consumption_kWh'] = monthly_data['consumption_kwh']
+        summary_df['Solar_Generation_kWh'] = monthly_data['energy_kwh']
+        summary_df['Grid_Import_kWh'] = monthly_data['from_ceb_import']
+        summary_df['Grid_Export_kWh'] = monthly_data['to_ceb_export']
+        summary_df['Wasted_Energy_kWh'] = monthly_data['wasted_energy']
 
-        print("\n" + "="*45)
+        # --- 5. CALCULATE FINANCIALS FOR EVERY SINGLE MONTH ---
+        # We use .apply() to run your JSON tariff function on every row individually!
+        
+        # 1. What would the bill be WITHOUT solar?
+        summary_df['Old_Bill_Rs'] = summary_df['Total_Consumption_kWh'].apply(
+            lambda units: calculate_no_solar_bill(units, my_tariff)
+        )
+        
+        # 2. What is the new bill WITH solar? (Only paying for what we imported)
+        summary_df['New_Bill_Rs'] = summary_df['Grid_Import_kWh'].apply(
+            lambda units: calculate_no_solar_bill(units, my_tariff)
+        )
+        
+        # 3. Revenue from selling to CEB (Rs 3.00 per kWh)
+        summary_df['Export_Revenue_Rs'] = summary_df['Grid_Export_kWh'] * 3.00
+        
+        # 4. Final out-of-pocket cost and Savings
+        summary_df['Final_Net_Bill_Rs'] = summary_df['New_Bill_Rs'] - summary_df['Export_Revenue_Rs']
+        summary_df['Total_Savings_Rs'] = summary_df['Old_Bill_Rs'] - summary_df['Final_Net_Bill_Rs']
+
+        # --- 6. PRINT A QUICK SUMMARY & SAVE CSVs ---
+        
+        # Print total project savings to the console
+        total_cash_saved = summary_df['Total_Savings_Rs'].sum()
+        total_months = len(summary_df)
+        print("\n" + "="*50)
         print("  ☀️ MAURITIUS CEB SOLAR BREAK-EVEN REPORT ☀️  ")
-        print("="*45)
-        print(f"System Size: {system_kwp} kWp Panels | {battery_kwh} kWh Battery")
-        print("-" * 45)
-        print("ENERGY METRICS (Average Monthly):")
-        print(f"  Old Household Consumption : {units_used:.2f} kWh")
-        print(f"  Solar Energy Generated    : {avg_solar_gen:.2f} kWh")
-        print(f"  New CEB Grid Import       : {avg_import_ceb:.2f} kWh (Bought from CEB)")
-        print(f"  New CEB Grid Export       : {avg_export_ceb:.2f} kWh (Sold to CEB)")
-        print(f"  Wasted/Clipped Energy     : {avg_wasted:.2f} kWh (Inverter limit hit)")
-        print("-" * 45)
-        print("FINANCIAL METRICS (Average Monthly):")
-        print(f"  Old CEB Bill              : Rs {old_bill_rs:.2f}")
-        print(f"  New CEB Bill (Import)     : Rs {new_bill_rs:.2f}")
-        print(f"  Revenue from Export       : Rs {export_revenue:.2f} (Rs 3.00/kWh rate)")
-        print(f"  FINAL NET CEB BILL        : Rs {final_net_bill:.2f}")
-        print("-" * 45)
-        print(f"💰 TOTAL MONTHLY SAVINGS   : Rs {(old_bill_rs - final_net_bill):.2f} 💰")
-        print("="*45)
+        print("="*50)
+        print(f"Total Months Simulated : {total_months} months")
+        print(f"Total Cash Saved       : Rs {total_cash_saved:,.2f}")
+        print(f"Average Monthly Saving : Rs {(total_cash_saved/total_months):,.2f}")
+        print("="*50)
 
+        # SAVE FILE 1: The Hourly Data (for debugging/physics analysis)
+        hourly_path = Path.home() / "Downloads" / "Solar_Hourly_Raw.csv"
+        df.to_csv(hourly_path)
         
-
-        download_path = Path.home() / "Downloads" / "Solar.csv"
-
-        df.to_csv(download_path)
-        print(f"File saved as {download_path}")
+        # SAVE FILE 2: The Beautiful Monthly Financial Report (for investors/users)
+        monthly_path = Path.home() / "Downloads" / "Solar_Monthly_Financials.csv"
+        summary_df.to_csv(monthly_path)
+        
+        print(f"\nFiles successfully saved!")
+        print(f"1. Hourly Physics Data: {hourly_path}")
+        print(f"2. Monthly Financials : {monthly_path}")
 
 
     else:
