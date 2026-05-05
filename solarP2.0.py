@@ -1,6 +1,9 @@
 import pvlib
 import pandas as pd
 from pathlib import Path
+import numpy as np
+import calendar
+from datetime import date
 
 LATITUDE = -20.16  #-90 to 90
 LONGITUDE = 57.55
@@ -50,10 +53,34 @@ def analyse_data(df):
     return monthly_energy
 
 
+def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
+
+    daily_kwh = monthly_bill_kwh/30   # change for better calculation according to year and month
+
+    conditions = [
+        (df.index.hour >= 0) & (df.index.hour < 6),   # Night
+        (df.index.hour >= 6) & (df.index.hour < 9),   # Morning
+        (df.index.hour >= 9) & (df.index.hour < 17),  # Day
+        (df.index.hour >= 17) & (df.index.hour < 22), # Evening Peak
+        (df.index.hour >= 22)                     # Late Night
+    ]
+
+    hourly_percentage = [0.025, 0.066, 0.025, 0.070, 0.050] #rough estimate change afterwards
+
+    df['consumption_kwh'] = np.select(conditions,hourly_percentage) * daily_kwh
+
+    df['battery_level'] = 0.0
+    df['to_ceb_export'] = 0.0
+    df['from_ceb_import'] = 0.0
+    df['wasted_energy'] = 0.0
+
+    current_battery = 0.0 # Battery starts empty
+    max_export = inverter_kw * 0.5 # CEB rule: 50% limit
+
     
 
-def calculate_solar_data():
-    print("okay")
+
+    
 
 
 if __name__ == "__main__" :
@@ -62,7 +89,7 @@ if __name__ == "__main__" :
     if df is not None:
         print("Data retrieved successfully!")
         print(df.head())
-        analyse_data(df)
+        monthly_solar = analyse_data(df)
 
         download_path = Path.home() / "Downloads" / "Solar.csv"
 
