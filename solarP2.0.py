@@ -198,7 +198,6 @@ if __name__ == "__main__" :
         summary_df['Wasted_Energy_kWh'] = monthly_data['wasted_energy']
 
         # --- 5. CALCULATE FINANCIALS FOR EVERY SINGLE MONTH ---
-        # We use .apply() to run your JSON tariff function on every row individually!
         
         # 1. What would the bill be WITHOUT solar?
         summary_df['Old_Bill_Rs'] = summary_df['Total_Consumption_kWh'].apply(
@@ -217,9 +216,9 @@ if __name__ == "__main__" :
         summary_df['Final_Net_Bill_Rs'] = summary_df['New_Bill_Rs'] - summary_df['Export_Revenue_Rs']
         summary_df['Total_Savings_Rs'] = summary_df['Old_Bill_Rs'] - summary_df['Final_Net_Bill_Rs']
 
-        # --- 6. PRINT A QUICK SUMMARY & SAVE CSVs ---
+        #print summary
         
-        # Print total project savings to the console
+        # print total project
         total_cash_saved = summary_df['Total_Savings_Rs'].sum()
         total_months = len(summary_df)
         print("\n" + "="*50)
