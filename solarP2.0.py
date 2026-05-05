@@ -77,7 +77,51 @@ def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
     current_battery = 0.0 # Battery starts empty
     max_export = inverter_kw * 0.5 # CEB rule: 50% limit
 
-    
+    #for loop for column index
+    export_col_idx = df.columns.get_loc('to_ceb_export')
+    wasted_col_idx = df.columns.get_loc('wasted_energy')
+    import_col_idx = df.columns.get_loc('from_ceb_import')
+
+    for i in range(len(df)):
+        solar = df['energy_kwh'].iloc[i]
+        cons = df['consumption'].iloc[i]
+
+        net = solar - cons
+
+        if net > 0:  # meaning producing extra kwh
+            space_left = battery_max_kwh - current_battery
+            to_battery = min(net,space_left)
+            current_battery +=to_battery
+            
+            #export to ceb
+            leftover_after_battery = net - to_battery
+            to_ceb = min(leftover_after_battery, max_export)
+
+            #wasted kwh
+            wasted = leftover_after_battery - to_ceb
+
+            df.iat[i,export_col_idx] = to_ceb
+            df.iat[i, wasted_col_idx] = wasted
+
+        else:
+            needed = abs(net)
+            from_battery = min(needed, current_battery)
+            current_battery -=from_battery
+
+            from_ceb = needed - from_battery
+            df.iat[i,import_col_idx] = from_ceb
+
+        df.iat[i, df.columns.get_loc('battery_level')] = current_battery
+
+
+
+
+
+
+
+
+
+
 
 
     
