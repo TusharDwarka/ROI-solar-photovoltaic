@@ -6,6 +6,7 @@ import calendar
 from datetime import date
 import json
 import os
+import matplotlib.pyplot as plt
 
 current_dir = Path(__file__).parent
 tariff_file = current_dir / "cebTariff" / "tariffs.json"
@@ -259,6 +260,102 @@ if __name__ == "__main__" :
         print(f"\nFiles successfully saved!")
         print(f"1. Hourly Physics Data: {hourly_path}")
         print(f"2. Monthly Financials : {monthly_path}")
+
+
+        # =========================================================
+        # --- 7. ADVANCED 25-YEAR BREAK-EVEN & ROI FORECAST ---
+        # =========================================================
+
+        avg_monthly_net_savings = summary_df['Net_Metering_Savings'].mean()
+        base_annual_savings = avg_monthly_net_savings * 12
+
+        # --- Variables ---
+        initial_investment = 400000 + 2000    # Rs 400k system + Rs 2k CEB fee
+        annual_maintenance = 3000             # Washing panels, checking wires
+        panel_degradation = 0.005             # Panels lose 0.5% efficiency per year
+        battery_replacement_year = 15         # Battery dies at Year 15
+        battery_replacement_cost = 100000     # Cost to buy a new battery in Year 15
+        project_lifespan = 25                 # We simulate over 25 years
+
+        # --- Time-Series Simulation ---
+        years = list(range(0, project_lifespan + 1))
+        cumulative_cashflow = [-initial_investment]  # Year 0: We are Rs 402,000 in the hole!
+        
+        break_even_year = None
+
+        for year in range(1, project_lifespan + 1):
+            # Calculate this year's savings (reduced by 0.5% degradation)
+            current_year_savings = base_annual_savings * ((1 - panel_degradation) ** year)
+            
+            # Net cash this year (Savings minus maintenance)
+            net_cash_this_year = current_year_savings - annual_maintenance
+            
+            # Check for Battery Replacement Event!
+            if year == battery_replacement_year:
+                net_cash_this_year -= battery_replacement_cost
+                
+            # Add this year's cash to our running total
+            new_cumulative_total = cumulative_cashflow[-1] + net_cash_this_year
+            cumulative_cashflow.append(new_cumulative_total)
+            
+            # Did we break even this year?
+            if cumulative_cashflow[-2] < 0 and cumulative_cashflow[-1] >= 0:
+                break_even_year = year
+
+        # --- TERMINAL REPORT ---
+        total_profit = cumulative_cashflow[-1]
+        
+        print("\n" + "="*55)
+        print(" 📈 25-YEAR FINANCIAL FORECAST 📈 ")
+        print("="*55)
+        print(f"Total Upfront Cost     : Rs {-cumulative_cashflow[0]:,.2f}")
+        print(f"Battery Replacement    : Rs {battery_replacement_cost:,.2f} (at Year {battery_replacement_year})")
+        if break_even_year:
+            print(f"⏳ BREAK-EVEN YEAR     : Year {break_even_year}")
+        else:
+            print("🚨 SYSTEM WILL NEVER BREAK EVEN 🚨")
+        print(f"💸 TOTAL NET PROFIT    : Rs {total_profit:,.2f} (After 25 years)")
+        print("="*55)
+
+        # =========================================================
+        # --- 8. GENERATE THE BREAK-EVEN GRAPH ---
+        # =========================================================
+        plt.style.use('seaborn-v0_8-darkgrid')
+        plt.figure(figsize=(10, 6))
+
+        # Plot the cumulative cash flow line
+        plt.plot(years, cumulative_cashflow, marker='o', linestyle='-', color='dodgerblue', linewidth=2)
+
+        # Draw a thick Red line at Rs 0 (The Break-Even Line)
+        plt.axhline(0, color='red', linestyle='--', linewidth=2, label="Break-Even Point (Rs 0)")
+
+        # Highlight the battery replacement drop
+        plt.annotate('Battery Replacement\n(Rs -100k)', 
+                     xy=(battery_replacement_year, cumulative_cashflow[battery_replacement_year]), 
+                     xytext=(battery_replacement_year-4, cumulative_cashflow[battery_replacement_year] + 50000),
+                     arrowprops=dict(facecolor='orange', shrink=0.05),
+                     fontsize=10, color='darkorange')
+
+        # Formatting the Graph
+        plt.title('Solar PV Investment ROI in Mauritius (25-Year Projection)', fontsize=14, fontweight='bold')
+        plt.xlabel('Years Since Installation', fontsize=12)
+        plt.ylabel('Cumulative Cash Flow (MUR)', fontsize=12)
+        plt.xticks(np.arange(0, 26, 2))  # Tick every 2 years
+        
+        # Format Y-axis with commas for Rupees
+        current_values = plt.gca().get_yticks()
+        plt.gca().set_yticklabels(['Rs {:,.0f}'.format(x) for x in current_values])
+
+        # Fill the area below 0 with red, and above 0 with green
+        plt.fill_between(years, cumulative_cashflow, 0, where=(np.array(cumulative_cashflow) < 0), color='salmon', alpha=0.3)
+        plt.fill_between(years, cumulative_cashflow, 0, where=(np.array(cumulative_cashflow) >= 0), color='lightgreen', alpha=0.5)
+
+        plt.legend()
+        plt.tight_layout()
+        
+        # Show the graph on screen
+        plt.show()
+
 
 
     else:
