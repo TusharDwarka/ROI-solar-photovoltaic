@@ -113,6 +113,8 @@ def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
 
         df.iat[i, df.columns.get_loc('battery_level')] = current_battery
 
+    return df
+
 
 
 
