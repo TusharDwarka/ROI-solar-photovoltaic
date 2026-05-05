@@ -66,9 +66,6 @@ def get_solar_data():
 def analyse_data(df, system_kwp):
     df["poa_global"] = df['poa_direct'] + df['poa_sky_diffuse'] + df['poa_ground_diffuse']
 
-    # convert into kWh
-    panel_area = 20 
-    efficiency = 0.20 
     pr = 0.85    #performance ratio /Heatloss etc
 
     df['energy_kwh'] = (df['poa_global'] / 1000) * system_kwp * pr
@@ -143,12 +140,22 @@ def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
 
     return df
 
+def calculate_cst(row):
+    consumption = row['Total_Consumption_kWh']
+    offset = row['Energy_Offset']
+    if consumption <= 500:
+        return 0.00
+    elif consumption <= 1000:
+        return offset * 0.82
+    else:
+        return offset * 1.63
+
 
 if __name__ == "__main__" :
 
     units_used = 339           # User's average monthly CEB bill (kWh)
     my_tariff = "120"          # User's CEB tariff code
-    system_kwp = 5.0           # Size of the solar panels (kW)
+    system_kwp = 2.5           # Size of the solar panels (kW)
     inverter_kw = 5.0          # Size of the inverter (kW)
     battery_kwh = 5.0          # Size of the battery (kWh)
 
@@ -191,31 +198,55 @@ if __name__ == "__main__" :
         summary_df['Old_Bill_Rs'] = summary_df['Total_Consumption_kWh'].apply(
             lambda units: calculate_no_solar_bill(units, my_tariff)
         )
+
+        # =========================================================
+        # NET-METERING CALCULATION (Tariff 150A_NM)
+        # =========================================================
+        # We only pay for what the battery/solar couldn't cover (Import)  Else get paid for what we export (Export) ad use Solar for free (Consumption)
         
         # 2. What is the new bill WITH solar? (Only paying for what we imported)
-        summary_df['New_Bill_Rs'] = summary_df['Grid_Import_kWh'].apply(
+        summary_df['Net_Meter_Bill'] = summary_df['Grid_Import_kWh'].apply(
             lambda units: calculate_no_solar_bill(units, my_tariff)
         )
+
+        summary_df['Energy_Offset'] = summary_df['Total_Consumption_kWh'] - summary_df['Grid_Import_kWh']
         
-        # 3. Revenue from selling to CEB (Rs 3.00 per kWh)
-        summary_df['Export_Revenue_Rs'] = summary_df['Grid_Export_kWh'] * 3.00
+
+        summary_df['CST_Tax_Rs'] = summary_df.apply(calculate_cst, axis=1)
         
-        # 4. Final out-of-pocket cost and Savings
-        summary_df['Final_Net_Bill_Rs'] = summary_df['New_Bill_Rs'] - summary_df['Export_Revenue_Rs']
-        summary_df['Total_Savings_Rs'] = summary_df['Old_Bill_Rs'] - summary_df['Final_Net_Bill_Rs']
+        # Revenue from excess sold at Rs 3.00
+        summary_df['Net_Export_Revenue'] = summary_df['Grid_Export_kWh'] * 3.00
+        
+        # Final Net Metering Bill
+        summary_df['Final_Net_Metering_Bill_Rs'] = summary_df['Net_Meter_Bill'] + summary_df['CST_Tax_Rs'] - summary_df['Net_Export_Revenue']
+        summary_df['Net_Metering_Savings'] = summary_df['Old_Bill_Rs'] - summary_df['Final_Net_Metering_Bill_Rs']
+
+        # =========================================================
+        # GROSS-METERING CALCULATION (Sell everything at Rs 4.20)
+        # =========================================================
+        summary_df['Gross_Export_Revenue'] = summary_df['Solar_Generation_kWh'] * 4.20
+        summary_df['Final_Gross_Metering_Bill_Rs'] = summary_df['Old_Bill_Rs'] - summary_df['Gross_Export_Revenue']
+        summary_df['Gross_Metering_Savings'] = summary_df['Old_Bill_Rs'] - summary_df['Final_Gross_Metering_Bill_Rs']
 
         #print summary
         
         # print total project
-        total_cash_saved = summary_df['Total_Savings_Rs'].sum()
-        total_months = len(summary_df)
-        print("\n" + "="*50)
-        print("  ☀️ MAURITIUS CEB SOLAR BREAK-EVEN REPORT ☀️  ")
-        print("="*50)
-        print(f"Total Months Simulated : {total_months} months")
-        print(f"Total Cash Saved       : Rs {total_cash_saved:,.2f}")
-        print(f"Average Monthly Saving : Rs {(total_cash_saved/total_months):,.2f}")
-        print("="*50)
+        total_net_savings = summary_df['Net_Metering_Savings'].sum()
+        total_gross_savings = summary_df['Gross_Metering_Savings'].sum()
+        
+        print("\n" + "="*55)
+        print(" ☀️ MAURITIUS CEB SOLAR BREAK-EVEN REPORT ☀️ ")
+        print("="*55)
+        print(f"Total Months Simulated : {len(summary_df)} months")
+        print("-" * 55)
+        print("💰 OPTION 1: NET-METERING (Use first, sell excess at Rs 3.00)")
+        print(f"Total Cash Saved       : Rs {total_net_savings:,.2f}")
+        print(f"Average Monthly Saving : Rs {(total_net_savings/len(summary_df)):,.2f}")
+        print("-" * 55)
+        print("💰 OPTION 2: GROSS-METERING (Sell everything at Rs 4.20)")
+        print(f"Total Cash Saved       : Rs {total_gross_savings:,.2f}")
+        print(f"Average Monthly Saving : Rs {(total_gross_savings/len(summary_df)):,.2f}")
+        print("="*55)
 
         # SAVE FILE 1: The Hourly Data (for debugging/physics analysis)
         hourly_path = Path.home() / "Downloads" / "Solar_Hourly_Raw.csv"
