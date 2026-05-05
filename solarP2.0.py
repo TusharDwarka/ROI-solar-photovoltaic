@@ -4,11 +4,46 @@ from pathlib import Path
 import numpy as np
 import calendar
 from datetime import date
+import json
+import os
+
+current_dir = Path(__file__).parent
+tariff_file = current_dir / "cebTariff" / "tariffs.json"
+
+with open(tariff_file,'r') as f:
+    normal_tariff = json.load(f)
+
 
 LATITUDE = -20.16  #-90 to 90
 LONGITUDE = 57.55
 START_DATE = 2020 #YYYYMMDD
 END_DATE = 2023
+
+def calculate_no_solar_bill(units,tariff_code):
+    tariff_data = normal_tariff['tariffs'][tariff_code]
+
+    if tariff_data['blocks'] == 'standard_blocks':
+        blocks = normal_tariff['rates']['standard_blocks']
+    else:
+        blocks=normal_tariff['rates']['social_starter_blocks_110A']
+    
+    energy_cost = 0
+    remaining_units = units
+
+    for limit,rate in blocks:
+        if remaining_units > limit:
+            energy_cost += limit * rate
+            remaining_units -= limit
+        else:
+            energy_cost += remaining_units * rate
+            remaining_units = 0
+            break
+    
+    bill_after_min = max(energy_cost, tariff_data['min_charge'])
+
+    total_bill = bill_after_min + tariff_data['mbc_fee'] + normal_tariff['meter_rental']
+
+    return total_bill
 
 def get_solar_data():
 
@@ -47,10 +82,10 @@ def analyse_data(df):
 
     monthly_energy = df['energy_kwh'].resample('M').sum()  #reassemble by month cause its in hour
 
-    print("\n--- Monthly Solar Generation (kWh) ---")
-    print(monthly_energy)
+    #print("\n--- Monthly Solar Generation (kWh) ---")
+    #print(monthly_energy)
     
-    return monthly_energy
+    return df
 
 
 def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
@@ -68,7 +103,6 @@ def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
     hourly_percentage = [0.025, 0.066, 0.025, 0.070, 0.050] #rough estimate change afterwards
 
     df['consumption_kwh'] = np.select(conditions,hourly_percentage) * daily_kwh
-
     df['battery_level'] = 0.0
     df['to_ceb_export'] = 0.0
     df['from_ceb_import'] = 0.0
@@ -84,7 +118,7 @@ def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
 
     for i in range(len(df)):
         solar = df['energy_kwh'].iloc[i]
-        cons = df['consumption'].iloc[i]
+        cons = df['consumption_kwh'].iloc[i]
 
         net = solar - cons
 
@@ -116,26 +150,72 @@ def hourly_calculation(df, monthly_bill_kwh, inverter_kw , battery_max_kwh):
     return df
 
 
-
-
-
-
-
-
-
-
-
-
-    
-
-
 if __name__ == "__main__" :
+
+    units_used = 339           # User's average monthly CEB bill (kWh)
+    my_tariff = "120"          # User's CEB tariff code
+    system_kwp = 5.0           # Size of the solar panels (kW)
+    inverter_kw = 5.0          # Size of the inverter (kW)
+    battery_kwh = 5.0          # Size of the battery (kWh)
+
+    print("\n[1] Fetching PVGIS Solar Data for Mauritius...")
     df = get_solar_data()
 
     if df is not None:
         print("Data retrieved successfully!")
-        print(df.head())
-        monthly_solar = analyse_data(df)
+        df.index = df.index + pd.Timedelta(hours=4)  #fix timezone mauritius
+        # print(df.head())
+
+        #monthly
+        df = analyse_data(df)
+
+        print("\n[2] Simulating Battery and CEB Grid Rules...")
+        df = hourly_calculation(
+            df, 
+            monthly_bill_kwh=units_used, 
+            inverter_kw=inverter_kw, 
+            battery_max_kwh=battery_kwh
+        )
+
+        #group by month
+        monthly_data = df.resample('M').sum()
+        avg_solar_gen = monthly_data['energy_kwh'].mean()
+        avg_import_ceb = monthly_data['from_ceb_import'].mean()
+        avg_export_ceb = monthly_data['to_ceb_export'].mean()
+        avg_wasted = monthly_data['wasted_energy'].mean()
+
+        print("\n[3] Calculating Financials...")
+
+        old_bill_rs = calculate_no_solar_bill(units_used, my_tariff)
+        new_bill_rs = calculate_no_solar_bill(avg_import_ceb, my_tariff)
+
+        export_revenue = avg_export_ceb * 3.00
+
+        final_net_bill = new_bill_rs - export_revenue
+        
+
+        print("\n" + "="*45)
+        print("  ☀️ MAURITIUS CEB SOLAR BREAK-EVEN REPORT ☀️  ")
+        print("="*45)
+        print(f"System Size: {system_kwp} kWp Panels | {battery_kwh} kWh Battery")
+        print("-" * 45)
+        print("ENERGY METRICS (Average Monthly):")
+        print(f"  Old Household Consumption : {units_used:.2f} kWh")
+        print(f"  Solar Energy Generated    : {avg_solar_gen:.2f} kWh")
+        print(f"  New CEB Grid Import       : {avg_import_ceb:.2f} kWh (Bought from CEB)")
+        print(f"  New CEB Grid Export       : {avg_export_ceb:.2f} kWh (Sold to CEB)")
+        print(f"  Wasted/Clipped Energy     : {avg_wasted:.2f} kWh (Inverter limit hit)")
+        print("-" * 45)
+        print("FINANCIAL METRICS (Average Monthly):")
+        print(f"  Old CEB Bill              : Rs {old_bill_rs:.2f}")
+        print(f"  New CEB Bill (Import)     : Rs {new_bill_rs:.2f}")
+        print(f"  Revenue from Export       : Rs {export_revenue:.2f} (Rs 3.00/kWh rate)")
+        print(f"  FINAL NET CEB BILL        : Rs {final_net_bill:.2f}")
+        print("-" * 45)
+        print(f"💰 TOTAL MONTHLY SAVINGS   : Rs {(old_bill_rs - final_net_bill):.2f} 💰")
+        print("="*45)
+
+        
 
         download_path = Path.home() / "Downloads" / "Solar.csv"
 
